@@ -21,7 +21,6 @@ class DatabaseManager:
                 short_url = self.generate_short_url()
             self.session.add(self.urls(long_url=long_url, short_url=short_url))
             self.session.commit()
-            print(f"long url '{long_url}' and short url '{short_url}' have been added to the database")
             return short_url
         else:
             if self.session.query(self.urls).filter_by(short_url=short_url).first():
@@ -36,13 +35,12 @@ class DatabaseManager:
         if result:
             return result.long_url
         else:
-            print(f"short url '{short_url}' not found in the database")
-            return None       
+            raise HTTPException(status_code=400, detail="Short URL not found")       
         
     def delete_url(self, short_url):
         result = self.session.query(self.urls).filter_by(short_url=short_url).first()
         if not result:
-            print(f"short url '{short_url}' not found in the database")
+            raise HTTPException(status_code=400, detail="Short URL not found")
         else:
             self.session.delete(result)
             self.session.commit()

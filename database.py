@@ -16,7 +16,6 @@ class urls(Base):
 Base.metadata.create_all(engine)
 
 dbm = database_manager.DatabaseManager(urls, session)
-# dbm.add_url("https://www.example.com", "exmpl")
-# dbm.get_url("exmpl")
-# dbm.delete_url("")
-# print(dbm.generate_short_url())
+
+# session.query(urls).delete()
+# session.commit()

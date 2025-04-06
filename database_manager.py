@@ -2,6 +2,7 @@ import random
 import string
 from typing import Optional
 from fastapi import HTTPException
+import qrcode
 
 class DatabaseManager:
     def __init__(self, urls, session):
@@ -11,6 +12,12 @@ class DatabaseManager:
     def generate_short_url(self):
         short_url = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
         return short_url
+    
+    def generate_qr(self, long_url: str, short_id:str):
+        img = qrcode.make(long_url)
+        path = f"static/qrcodes/{short_id}.png"
+        img.save(path)
+        return path
     
     def add_url(self, long_url, short_url: Optional[str] = None):
         if not short_url:

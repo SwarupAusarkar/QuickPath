@@ -10,14 +10,15 @@ class DatabaseManager:
         self.session = session
      
     def generate_short_url(self):
-        short_url = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        return short_url
-    
-    def generate_qr(self, long_url: str, short_id:str):
+        chars = ''.join(random.choices(string.ascii_lowercase, k=4))
+        digits = ''.join(random.choices(string.digits, k=2))
+        return chars + digits
+
+    def generate_qr(self, long_url: str, short_id: str):
         img = qrcode.make(long_url)
         path = f"static/qrcodes/{short_id}.png"
         img.save(path)
-        return path
+        return f"qrcodes/{short_id}.png"
     
     def add_url(self, long_url, short_url: Optional[str] = None):
         if not short_url:

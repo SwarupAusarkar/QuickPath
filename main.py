@@ -35,7 +35,7 @@ async def shorten_url(request: URLRequest):
     return {
         "original_url": request.original_url,
         "short_url": f"{BASE_URL}/{short_id}",
-        "qr_code_url": f"{BASE_URL}/{qr_path}"
+        "qr_code_url": f"{BASE_URL}/static/qrcodes/{short_id}.png" 
     }
 
 @app.get("/{short_url}")

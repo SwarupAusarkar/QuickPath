@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+databases
+sqlalchemy
+qrcode
+python-dotenv
+supabase
+pydantic
+aiofiles
+python-multipart  

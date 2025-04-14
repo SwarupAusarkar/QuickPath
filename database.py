@@ -1,21 +1,15 @@
-from sqlalchemy import Column, Integer, String, create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-import database_manager
+from sqlalchemy import Column, Integer, MetaData, String, Table
+from sqlalchemy.orm import declarative_base
 
-engine = create_engine("sqlite:///database.db")
 Base = declarative_base()
+metadata = MetaData()
 
-Session = sessionmaker(engine)
-session = Session()
-class urls(Base):
-    __tablename__ = "urls"
-    id = Column(Integer, primary_key=True, index=True)
-    long_url = Column(String,nullable=False)
-    short_url = Column(String, unique = True, nullable=False)
-    
-Base.metadata.create_all(engine)
-
-dbm = database_manager.DatabaseManager(urls, session)
-
-# session.query(urls).delete()
-# session.commit()
+# URLs table definition
+urls = Table(
+    "urls",
+    metadata,
+    Column("id", Integer, primary_key=True, index=True),
+    Column("long_url", String, nullable=False),
+    Column("short_url", String, unique=True, nullable=False),
+    Column("qr_code", String, unique=True, nullable=False),
+)

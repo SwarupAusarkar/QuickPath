@@ -266,7 +266,10 @@
             document.getElementById("long-url").value = "";
             document.getElementById("custom-url").value = "";
 
-            downloadQRbtn.onclick = async function () {
+            downloadQRbtn.onclick = async function (e) {
+              // Prevent default button behavior
+              e.preventDefault();
+              
               try {
                 const res = await fetch(qrCodeImg.src);
                 
@@ -282,15 +285,22 @@
                 const a = document.createElement("a");
                 a.href = url;
                 a.download = "qr_code.png";
+                
+                // Don't append to document
+                a.style.display = "none";
                 document.body.appendChild(a);
                 a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
+                
+                // Clean up
+                setTimeout(() => {
+                  document.body.removeChild(a);
+                  window.URL.revokeObjectURL(url);
+                }, 100);
               } catch (err) {
                 console.error("QR Download failed:", err);
                 alert("Failed to download QR code.");
               }
-            };            
+            };
             };            
           
         } catch (err) {

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import select
 from typing import Optional
 from databases import Database
 from dotenv import load_dotenv
@@ -15,12 +16,14 @@ from supabase import create_client, Client
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./database.db")
-database = Database(DATABASE_URL)
-dbm = DatabaseManager(database, urls)
-
 SUPABASE_URL = os.getenv("SUPABASE_URL")
+BASE_URL = os.getenv("BASE_URL")
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
+
+database = Database(DATABASE_URL)
+dbm = DatabaseManager(database, urls, supabase)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,8 +47,6 @@ class URLRequest(BaseModel):
     original_url: str
     custom_short: Optional[str] = None
 
-BASE_URL = os.getenv("BASE_URL")
-
 # Route to serve homepage
 @app.get("/")
 async def serve_homepage():
@@ -57,16 +58,19 @@ async def shorten_url(request: URLRequest):
     try:
         short_id = await dbm.add_url(request.original_url, request.custom_short)
         short_url = f"{BASE_URL}/{short_id}"
-
-        # Fetch the QR code URL from the database
-        result = await dbm.get_url(short_id)  
-        qr_url = result.qr_code  
-
-        return {
-            "original_url": request.original_url,
-            "short_url": short_url,
-            "qr_code_url": qr_url  # Supabase URL from the database
-        }
+        
+        # Get the URL record from the database
+        query = select(urls).where(urls.c.short_url == short_id)
+        result = await database.fetch_one(query)
+        
+        if result:
+            return {
+                "original_url": request.original_url,
+                "short_url": short_url,
+                "qr_code_url": result["qr_code"]
+            }
+        else:
+            return {"error": "Failed to retrieve URL information"}
     except Exception as e:
         return {"error": str(e)}
 

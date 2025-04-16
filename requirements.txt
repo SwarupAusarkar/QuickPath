@@ -7,4 +7,5 @@ python-dotenv
 supabase
 pydantic
 aiofiles
-python-multipart  
+python-multipart
+asyncpg

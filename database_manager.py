@@ -9,9 +9,10 @@ import qrcode
 import supabase
 
 class DatabaseManager:
-    def __init__(self, database, urls_table):
+    def __init__(self, database, urls_table, supabase_client):
         self.database = database
         self.urls_table = urls_table
+        self.supabase = supabase_client
 
     def generate_short_url(self):
         chars = ''.join(random.choices(string.ascii_lowercase, k=4))
@@ -31,10 +32,10 @@ class DatabaseManager:
         bucket_name = "qr-codes" 
         file_name = f"{short_id}.png"
         
-        response = supabase.storage.from_(bucket_name).upload(file_name, buffer)
+        response = self.supabase.storage.from_(bucket_name).upload(file_name, buffer)
 
         if response.status_code == 200:
-            qr_url = supabase.storage.from_(bucket_name).get_public_url(file_name)
+            qr_url = self.supabase.storage.from_(bucket_name).get_public_url(file_name)
             return qr_url['publicURL']
         else:
             raise Exception("QR code upload failed.")

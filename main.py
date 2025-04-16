@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from database import urls
+from database import urls  # Ensure this is defined correctly
 from database_manager import DatabaseManager
 import os
 from supabase import create_client, Client
@@ -15,7 +15,7 @@ from supabase import create_client, Client
 # Load environment variables
 load_dotenv()
 
-# Initialize FastAPI app
+# Initialize FastAPI app with lifespan context
 app = FastAPI()
 
 # Setup database connection and manager
@@ -44,7 +44,7 @@ app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Adjust for production environments
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,22 +66,30 @@ async def serve_homepage():
 # Route to shorten URLs
 @app.post("/shorten")
 async def shorten_url(request: URLRequest):
-    # Generate the short_id and store the URL
-    short_id = await dbm.add_url(request.original_url, request.custom_short)
-    short_url = f"{BASE_URL}/{short_id}"
+    try:
+        # Generate the short_id and store the URL
+        short_id = await dbm.add_url(request.original_url, request.custom_short)
+        short_url = f"{BASE_URL}/{short_id}"
 
-    # Fetch the QR code URL from the database
-    result = await dbm.get_url(short_id)  # Use async method for fetching URL
-    qr_url = result.qr_code
+        # Fetch the QR code URL from the database
+        result = await dbm.get_url(short_id)  # Use async method for fetching URL
+        qr_url = result.qr_code  # Ensure this field is correctly returned from the db
 
-    return {
-        "original_url": request.original_url,
-        "short_url": short_url,
-        "qr_code_url": qr_url  # Supabase URL from the database
-    }
+        return {
+            "original_url": request.original_url,
+            "short_url": short_url,
+            "qr_code_url": qr_url  # Supabase URL from the database
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 # Route to redirect to long URL
 @app.get("/{short_url}")
 async def redirect_to_long_url(short_url: str):
-    long_url = await dbm.get_url(short_url)
-    return RedirectResponse(url=long_url)
+    try:
+        long_url = await dbm.get_url(short_url)
+        if long_url:
+            return RedirectResponse(url=long_url)
+        return {"error": "Short URL not found"}
+    except Exception as e:
+        return {"error": str(e)}

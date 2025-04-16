@@ -2,23 +2,20 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from databases import Database
 from sqlalchemy import select
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from database import urls  # Ensure this is defined correctly
+from database import urls
 from database_manager import DatabaseManager
 import os
 from supabase import create_client, Client
 
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./database.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-BASE_URL = os.getenv("BASE_URL")
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
+BASE_URL = os.getenv("BASE_URL")
 
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 print(supabase_client)
@@ -34,8 +31,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Static files setup for frontend
-app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Adjust for production environments
@@ -79,7 +74,7 @@ async def shorten_url(request: URLRequest):
 @app.get("/{short_url}")
 async def redirect_to_long_url(short_url: str):
     try:
-        result = await dbm.get_url(short_url)
+        result = await dbm.get_url(short_url) 
         if result:
             long_url = result["long_url"]
             return RedirectResponse(url=long_url)

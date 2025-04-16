@@ -42,7 +42,7 @@ class DatabaseManager:
             )
 
             # Validate the upload response
-            if response and "path" in response:
+            if response and hasattr(response, "path"):
                 # Get the public URL for the uploaded QR code
                 qr_url = self.supabase.storage.from_(bucket_name).get_public_url(file_name)
                 return qr_url

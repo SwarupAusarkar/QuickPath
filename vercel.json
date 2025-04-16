@@ -1,23 +1,22 @@
 {
-    "version": 2,
-    "builds": [
+  "version": 2,
+  "builds": [
       {
-        "src": "main.py",
-        "use": "@vercel/python",
-        "config": {
-          "maxLambdaSize": "50mb"
-        }
+          "src": "main.py",
+          "use": "@vercel/python",
+          "config": {
+              "maxLambdaSize": "50mb"
+          }
       }
-    ],
-    "routes": [
+  ],
+  "routes": [
       {
-        "src": "/static/(.*)",
-        "dest": "/static/$1"
+          "src": "/static/(.*)",
+          "dest": "/static/$1"
       },
       {
-        "src": "/(.*)",
-        "dest": "/main.py"
+          "src": "/(.*)",
+          "dest": "/main.py"
       }
-    ]
-  }
-  
+  ]
+}

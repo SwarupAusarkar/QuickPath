@@ -25,19 +25,15 @@ class DatabaseManager:
         img.save(buffer, format="PNG")
         buffer.seek(0)
 
-        # Run the upload to Supabase Storage asynchronously in a separate thread
         return await asyncio.to_thread(self.upload_to_supabase, buffer, short_id)
 
     def upload_to_supabase(self, buffer, short_id):
-        # Upload the file to Supabase Storage
-        bucket_name = "qr-codes"  # Your Supabase bucket name
+        bucket_name = "qr-codes" 
         file_name = f"{short_id}.png"
         
-        # Upload the file
         response = supabase.storage.from_(bucket_name).upload(file_name, buffer)
 
         if response.status_code == 200:
-            # Get the public URL of the uploaded file
             qr_url = supabase.storage.from_(bucket_name).get_public_url(file_name)
             return qr_url['publicURL']
         else:
@@ -52,7 +48,6 @@ class DatabaseManager:
                 raise HTTPException(status_code=400, detail="Short URL already exists, please choose another one")
             short_url = custom_short
         else:
-            # Generate unique short URL
             short_url = self.generate_short_url()
             while True:
                 query = select(self.urls_table).where(self.urls_table.c.short_url == short_url)
@@ -61,7 +56,6 @@ class DatabaseManager:
                     break
                 short_url = self.generate_short_url()
 
-        # Generate and upload the QR code to Supabase
         qr_code_url = await self.generate_qr(long_url, short_url)
 
         # Insert URL and QR code URL into the database

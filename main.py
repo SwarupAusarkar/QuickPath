@@ -12,32 +12,22 @@ from database_manager import DatabaseManager
 import os
 from supabase import create_client, Client
 
-# Load environment variables
 load_dotenv()
 
-# Initialize FastAPI app with lifespan context
-app = FastAPI()
-
-# Setup database connection and manager
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./database.db")
 database = Database(DATABASE_URL)
 dbm = DatabaseManager(database, urls)
 
-# Supabase setup
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 
-# Lifespan context for DB connection management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Connect to DB on startup
     await database.connect()
     yield
-    # Disconnect on shutdown
     await database.disconnect()
 
-# Attach lifespan event to FastAPI app
 app = FastAPI(lifespan=lifespan)
 
 # Static files setup for frontend
@@ -50,12 +40,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pydantic model for URL request
 class URLRequest(BaseModel):
     original_url: str
     custom_short: Optional[str] = None
 
-# Base URL setup
 BASE_URL = os.getenv("BASE_URL")
 
 # Route to serve homepage
@@ -67,13 +55,12 @@ async def serve_homepage():
 @app.post("/shorten")
 async def shorten_url(request: URLRequest):
     try:
-        # Generate the short_id and store the URL
         short_id = await dbm.add_url(request.original_url, request.custom_short)
         short_url = f"{BASE_URL}/{short_id}"
 
         # Fetch the QR code URL from the database
-        result = await dbm.get_url(short_id)  # Use async method for fetching URL
-        qr_url = result.qr_code  # Ensure this field is correctly returned from the db
+        result = await dbm.get_url(short_id)  
+        qr_url = result.qr_code  
 
         return {
             "original_url": request.original_url,

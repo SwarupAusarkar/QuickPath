@@ -27,10 +27,31 @@ class DatabaseManager:
             img.save(buffer, format="PNG")
             buffer.seek(0)
 
-            return await asyncio.to_thread(self.upload_to_supabase, buffer, short_id)
+            # Upload the QR code to Supabase
+            bucket_name = "qr-codes"
+            file_name = f"{short_id}.png"
+
+            # Convert BytesIO to bytes
+            file_data = buffer.read()
+
+            # Upload the file to Supabase
+            response = self.supabase.storage.from_(bucket_name).upload(
+                path=file_name,
+                file=file_data,
+                file_options={"content-type": "image/png"}
+            )
+
+            # Validate the upload response
+            if response and "path" in response:
+                # Get the public URL for the uploaded QR code
+                qr_url = self.supabase.storage.from_(bucket_name).get_public_url(file_name)
+                return qr_url
+            else:
+                print(f"QR upload failed: {response}")
+                return f"https://via.placeholder.com/150?text={short_id}"
         except Exception as e:
             print(f"Error generating QR code: {str(e)}")
-            return f"https://placeholder.com/{short_id}"
+            return f"https://via.placeholder.com/150?text={short_id}"
 
     def upload_to_supabase(self, buffer, short_id):
         bucket_name = "qr-codes" 
@@ -71,6 +92,7 @@ class DatabaseManager:
                     break
                 short_url = self.generate_short_url()
 
+        # Generate a QR code and upload it to Supabase
         qr_code_url = await self.generate_qr(long_url, short_url)
 
         # Insert URL and QR code URL into the database
@@ -87,7 +109,7 @@ class DatabaseManager:
         query = select(self.urls_table).where(self.urls_table.c.short_url == short_url)
         result = await self.database.fetch_one(query)
         if result:
-            return result
+            return result  # Return the Record object
         else:
             raise HTTPException(status_code=400, detail="Short URL not found")
 

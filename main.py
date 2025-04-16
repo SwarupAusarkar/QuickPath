@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
-import select
 from typing import Optional
 from databases import Database
+from sqlalchemy import select
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
@@ -20,7 +20,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 BASE_URL = os.getenv("BASE_URL")
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
 
-supabase_client : Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
+supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
+print(supabase_client)
 
 database = Database(DATABASE_URL)
 dbm = DatabaseManager(database, urls, supabase_client)
@@ -74,13 +75,13 @@ async def shorten_url(request: URLRequest):
     except Exception as e:
         print(f"Error in shorten_url: {str(e)}")  # Add logging
         return {"error": str(e)}
-
-# Route to redirect to long URL
+    
 @app.get("/{short_url}")
 async def redirect_to_long_url(short_url: str):
     try:
-        long_url = await dbm.get_url(short_url)
-        if long_url:
+        result = await dbm.get_url(short_url)
+        if result:
+            long_url = result["long_url"]
             return RedirectResponse(url=long_url)
         return {"error": "Short URL not found"}
     except Exception as e:

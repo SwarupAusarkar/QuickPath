@@ -20,13 +20,17 @@ class DatabaseManager:
         return chars + digits
 
     async def generate_qr(self, long_url: str, short_id: str):
-        # Generate the QR code
-        img = qrcode.make(long_url)
-        buffer = BytesIO()
-        img.save(buffer, format="PNG")
-        buffer.seek(0)
+        try:
+            # Generate the QR code
+            img = qrcode.make(long_url)
+            buffer = BytesIO()
+            img.save(buffer, format="PNG")
+            buffer.seek(0)
 
-        return await asyncio.to_thread(self.upload_to_supabase, buffer, short_id)
+            return await asyncio.to_thread(self.upload_to_supabase, buffer, short_id)
+        except Exception as e:
+            print(f"Error generating QR code: {str(e)}")
+            return f"https://placeholder.com/{short_id}"
 
     def upload_to_supabase(self, buffer, short_id):
         bucket_name = "qr-codes" 
@@ -70,10 +74,10 @@ class DatabaseManager:
         return short_url
     
     async def get_url(self, short_url):
-        query = select(self.urls_table.c.long_url).where(self.urls_table.c.short_url == short_url)
+        query = select(self.urls_table).where(self.urls_table.c.short_url == short_url)
         result = await self.database.fetch_one(query)
         if result:
-            return result["long_url"]
+            return result
         else:
             raise HTTPException(status_code=400, detail="Short URL not found")
 

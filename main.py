@@ -58,20 +58,21 @@ async def shorten_url(request: URLRequest):
     try:
         short_id = await dbm.add_url(request.original_url, request.custom_short)
         short_url = f"{BASE_URL}/{short_id}"
-        
-        # Get the URL record from the database
+
+        # Fetch the complete record
         query = select(urls).where(urls.c.short_url == short_id)
         result = await database.fetch_one(query)
         
-        if result:
-            return {
-                "original_url": request.original_url,
-                "short_url": short_url,
-                "qr_code_url": result["qr_code"]
-            }
-        else:
+        if not result:
             return {"error": "Failed to retrieve URL information"}
+            
+        return {
+            "original_url": request.original_url,
+            "short_url": short_url,
+            "qr_code_url": result["qr_code"]
+        }
     except Exception as e:
+        print(f"Error in shorten_url: {str(e)}")  # Add logging
         return {"error": str(e)}
 
 # Route to redirect to long URL

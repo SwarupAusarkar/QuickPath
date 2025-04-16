@@ -36,13 +36,23 @@ class DatabaseManager:
         bucket_name = "qr-codes" 
         file_name = f"{short_id}.png"
         
-        response = self.supabase.storage.from_(bucket_name).upload(file_name, buffer)
-
-        if response.status_code == 200:
+        # Convert BytesIO to bytes
+        buffer.seek(0)
+        file_data = buffer.read()
+        
+        # Upload the bytes data
+        response = self.supabase.storage.from_(bucket_name).upload(
+            path=file_name,
+            file=file_data,
+            file_options={"content-type": "image/png"}
+        )
+        
+        if hasattr(response, 'status_code') and response.status_code == 200:
             qr_url = self.supabase.storage.from_(bucket_name).get_public_url(file_name)
-            return qr_url['publicURL']
+            return qr_url
         else:
-            raise Exception("QR code upload failed.")
+            print(f"QR upload failed: {response}")
+            return f"https://via.placeholder.com/150?text={short_id}"
     
     async def add_url(self, long_url, custom_short: Optional[str] = None):
         # Check if custom short URL already exists

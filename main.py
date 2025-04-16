@@ -20,10 +20,10 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 BASE_URL = os.getenv("BASE_URL")
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
+supabase_client : Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 
 database = Database(DATABASE_URL)
-dbm = DatabaseManager(database, urls, supabase)
+dbm = DatabaseManager(database, urls, supabase_client)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

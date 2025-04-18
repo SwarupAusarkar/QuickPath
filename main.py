@@ -4,18 +4,28 @@ from databases import Database
 from sqlalchemy import select
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from database import urls
 from database_manager import DatabaseManager
 import os
 from supabase import create_client, Client
+from dotenv import load_dotenv
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load environment variables from .env file
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
 BASE_URL = os.getenv("BASE_URL")
+
+logger.info(f"DATABASE_URL configured: {bool(DATABASE_URL)}")
+logger.info(f"SUPABASE_URL configured: {bool(SUPABASE_URL)}")
+logger.info(f"BASE_URL configured: {bool(BASE_URL)}")
 
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 print(supabase_client)
@@ -52,6 +62,7 @@ async def serve_homepage():
 @app.post("/shorten")
 async def shorten_url(request: URLRequest):
     try:
+        logger.info(f"Received request to shorten: {request.original_url[:30]}...")
         short_id = await dbm.add_url(request.original_url, request.custom_short)
         short_url = f"{BASE_URL}/{short_id}"
 
@@ -68,7 +79,7 @@ async def shorten_url(request: URLRequest):
             "qr_code_url": result["qr_code"]
         }
     except Exception as e:
-        print(f"Error in shorten_url: {str(e)}")  # Add logging
+        logger.error(f"Error in shorten_url: {str(e)}", exc_info=True)
         return {"error": str(e)}
     
 @app.get("/{short_url}")

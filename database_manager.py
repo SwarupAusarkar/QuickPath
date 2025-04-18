@@ -34,45 +34,62 @@ class DatabaseManager:
             # Convert BytesIO to bytes
             file_data = buffer.read()
 
-            # Upload the file to Supabase
+            print(f"Attempting to upload QR for {short_id} to {bucket_name}")
+            
+            # Add detailed error checking for Supabase
+            try:
+                response = self.supabase.storage.from_(bucket_name).upload(
+                    path=file_name,
+                    file=file_data,
+                    file_options={"content-type": "image/png"}
+                )
+                print(f"Supabase upload response: {response}")
+                
+                if response and hasattr(response, "path"):
+                    qr_url = self.supabase.storage.from_(bucket_name).get_public_url(file_name)
+                    print(f"Generated QR URL: {qr_url}")
+                    return qr_url
+                else:
+                    print(f"QR upload failed - no path in response: {response}")
+                    return f"https://via.placeholder.com/150?text={short_id}"
+            except Exception as upload_error:
+                print(f"Supabase upload exception: {str(upload_error)}")
+                return f"https://via.placeholder.com/150?text={short_id}"
+                
+        except Exception as e:
+            print(f"General QR generation error: {str(e)}")
+            return f"https://via.placeholder.com/150?text={short_id}"
+
+    def upload_to_supabase(self, buffer, short_id):
+        try:
+            bucket_name = "qr-codes" 
+            file_name = f"{short_id}.png"
+            
+            # Convert BytesIO to bytes
+            buffer.seek(0)
+            file_data = buffer.read()
+            
+            print(f"Uploading {short_id} to Supabase bucket {bucket_name}")
+            
+            # Upload the bytes data
             response = self.supabase.storage.from_(bucket_name).upload(
                 path=file_name,
                 file=file_data,
                 file_options={"content-type": "image/png"}
             )
-
-            # Validate the upload response
-            if response and hasattr(response, "path"):
-                # Get the public URL for the uploaded QR code
+            
+            print(f"Upload response: {response}")
+            
+            # Check for successful upload
+            if response and (hasattr(response, 'path') or (isinstance(response, dict) and 'path' in response)):
                 qr_url = self.supabase.storage.from_(bucket_name).get_public_url(file_name)
+                print(f"Generated URL: {qr_url}")
                 return qr_url
             else:
                 print(f"QR upload failed: {response}")
                 return f"https://via.placeholder.com/150?text={short_id}"
         except Exception as e:
-            print(f"Error generating QR code: {str(e)}")
-            return f"https://via.placeholder.com/150?text={short_id}"
-
-    def upload_to_supabase(self, buffer, short_id):
-        bucket_name = "qr-codes" 
-        file_name = f"{short_id}.png"
-        
-        # Convert BytesIO to bytes
-        buffer.seek(0)
-        file_data = buffer.read()
-        
-        # Upload the bytes data
-        response = self.supabase.storage.from_(bucket_name).upload(
-            path=file_name,
-            file=file_data,
-            file_options={"content-type": "image/png"}
-        )
-        
-        if hasattr(response, 'status_code') and response.status_code == 200:
-            qr_url = self.supabase.storage.from_(bucket_name).get_public_url(file_name)
-            return qr_url
-        else:
-            print(f"QR upload failed: {response}")
+            print(f"Upload error: {str(e)}")
             return f"https://via.placeholder.com/150?text={short_id}"
     
     async def add_url(self, long_url, custom_short: Optional[str] = None):

@@ -50,16 +50,14 @@ class URLRequest(BaseModel):
     original_url: str
     custom_short: Optional[str] = None
 
-# Database dependency
 async def get_database():
-    if not database.is_connected:
-        await database.connect()
     try:
+        if not database.is_connected:
+            await database.connect()
         yield database
     except Exception as e:
-        logger.error(f"Database error: {str(e)}")
-    # We don't disconnect here since in serverless environments
-    # we want to keep the connection for as long as possible
+        logger.error(f"Database connection error: {str(e)}")
+        raise e
 
 # Database manager dependency
 async def get_dbm():

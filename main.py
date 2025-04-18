@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from databases import Database
 from sqlalchemy import select
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -27,17 +27,26 @@ logger.info(f"DATABASE_URL configured: {bool(DATABASE_URL)}")
 logger.info(f"SUPABASE_URL configured: {bool(SUPABASE_URL)}")
 logger.info(f"BASE_URL configured: {bool(BASE_URL)}")
 
+# Initialize supabase client
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
-print(supabase_client)
-
-database = Database(DATABASE_URL)
-dbm = DatabaseManager(database, urls, supabase_client)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize database connection when the app starts
+    database = Database(DATABASE_URL)
     await database.connect()
+    
+    # Create database manager and attach both to app state
+    app.state.database = database
+    app.state.dbm = DatabaseManager(database, urls, supabase_client)
+    
+    logger.info("Database connected and manager initialized")
+    
     yield
+    
+    # Clean up when the app shuts down
     await database.disconnect()
+    logger.info("Database disconnected")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -60,9 +69,14 @@ async def serve_homepage():
 
 # Route to shorten URLs
 @app.post("/shorten")
-async def shorten_url(request: URLRequest):
+async def shorten_url(request: URLRequest, app_request: Request):
     try:
         logger.info(f"Received request to shorten: {request.original_url[:30]}...")
+        
+        # Get database manager from app state
+        dbm = app_request.app.state.dbm
+        database = app_request.app.state.database
+        
         short_id = await dbm.add_url(request.original_url, request.custom_short)
         short_url = f"{BASE_URL}/{short_id}"
 
@@ -83,8 +97,11 @@ async def shorten_url(request: URLRequest):
         return {"error": str(e)}
     
 @app.get("/{short_url}")
-async def redirect_to_long_url(short_url: str):
+async def redirect_to_long_url(short_url: str, request: Request):
     try:
+        # Get database manager from app state
+        dbm = request.app.state.dbm
+        
         result = await dbm.get_url(short_url) 
         if result:
             long_url = result["long_url"]
@@ -92,3 +109,12 @@ async def redirect_to_long_url(short_url: str):
         return {"error": "Short URL not found"}
     except Exception as e:
         return {"error": str(e)}
+    
+@app.get("/health")
+async def health_check(request: Request):
+    try:
+        # Check database connection
+        await request.app.state.database.fetch_one("SELECT 1")
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}, 503

@@ -115,8 +115,8 @@ Response:
 ```json
 {
   "original_url": "https://example.com/very/long/url/that/needs/shortening",
-  "short_url": "https://shortrive.com/custom",
-  "qr_code_url": "https://shortrive.com/qr/custom.png"
+  "short_url": "https://QuickPath.com/custom",
+  "qr_code_url": "https://QuickPath.com/qr/custom.png"
 }
 ```
 

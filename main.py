@@ -11,7 +11,6 @@ import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import logging
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -26,6 +25,18 @@ BASE_URL = os.getenv("BASE_URL")
 logger.info(f"DATABASE_URL configured: {bool(DATABASE_URL)}")
 logger.info(f"SUPABASE_URL configured: {bool(SUPABASE_URL)}")
 logger.info(f"BASE_URL configured: {bool(BASE_URL)}")
+
+import socket
+
+# Monkey-patch getaddrinfo to force IPv4
+original_getaddrinfo = socket.getaddrinfo
+
+def force_ipv4_getaddrinfo(*args, **kwargs):
+    return original_getaddrinfo(
+        *args, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, flags=0
+    )
+
+socket.getaddrinfo = force_ipv4_getaddrinfo
 
 # Initialize database
 database = Database(DATABASE_URL)

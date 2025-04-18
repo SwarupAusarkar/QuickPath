@@ -1,8 +1,7 @@
-from contextlib import asynccontextmanager
 from typing import Optional
 from databases import Database
 from sqlalchemy import select
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Depends
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -12,6 +11,7 @@ import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -27,28 +27,16 @@ logger.info(f"DATABASE_URL configured: {bool(DATABASE_URL)}")
 logger.info(f"SUPABASE_URL configured: {bool(SUPABASE_URL)}")
 logger.info(f"BASE_URL configured: {bool(BASE_URL)}")
 
+# Initialize database
+database = Database(DATABASE_URL)
+
 # Initialize supabase client
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize database connection when the app starts
-    database = Database(DATABASE_URL)
-    await database.connect()
-    
-    # Create database manager and attach both to app state
-    app.state.database = database
-    app.state.dbm = DatabaseManager(database, urls, supabase_client)
-    
-    logger.info("Database connected and manager initialized")
-    
-    yield
-    
-    # Clean up when the app shuts down
-    await database.disconnect()
-    logger.info("Database disconnected")
+# Create database manager
+dbm = DatabaseManager(database, urls, supabase_client)
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,6 +50,23 @@ class URLRequest(BaseModel):
     original_url: str
     custom_short: Optional[str] = None
 
+# Database dependency
+async def get_database():
+    if not database.is_connected:
+        await database.connect()
+    try:
+        yield database
+    except Exception as e:
+        logger.error(f"Database error: {str(e)}")
+    # We don't disconnect here since in serverless environments
+    # we want to keep the connection for as long as possible
+
+# Database manager dependency
+async def get_dbm():
+    if not database.is_connected:
+        await database.connect()
+    yield dbm
+
 # Route to serve homepage
 @app.get("/")
 async def serve_homepage():
@@ -69,20 +74,20 @@ async def serve_homepage():
 
 # Route to shorten URLs
 @app.post("/shorten")
-async def shorten_url(request: URLRequest, app_request: Request):
+async def shorten_url(
+    request: URLRequest, 
+    db: Database = Depends(get_database),
+    db_manager: DatabaseManager = Depends(get_dbm)
+):
     try:
         logger.info(f"Received request to shorten: {request.original_url[:30]}...")
         
-        # Get database manager from app state
-        dbm = app_request.app.state.dbm
-        database = app_request.app.state.database
-        
-        short_id = await dbm.add_url(request.original_url, request.custom_short)
+        short_id = await db_manager.add_url(request.original_url, request.custom_short)
         short_url = f"{BASE_URL}/{short_id}"
 
         # Fetch the complete record
         query = select(urls).where(urls.c.short_url == short_id)
-        result = await database.fetch_one(query)
+        result = await db.fetch_one(query)
         
         if not result:
             return {"error": "Failed to retrieve URL information"}
@@ -97,24 +102,24 @@ async def shorten_url(request: URLRequest, app_request: Request):
         return {"error": str(e)}
     
 @app.get("/{short_url}")
-async def redirect_to_long_url(short_url: str, request: Request):
+async def redirect_to_long_url(
+    short_url: str, 
+    db_manager: DatabaseManager = Depends(get_dbm)
+):
     try:
-        # Get database manager from app state
-        dbm = request.app.state.dbm
-        
-        result = await dbm.get_url(short_url) 
+        result = await db_manager.get_url(short_url) 
         if result:
             long_url = result["long_url"]
             return RedirectResponse(url=long_url)
         return {"error": "Short URL not found"}
     except Exception as e:
         return {"error": str(e)}
-    
+
+# Add a health check endpoint
 @app.get("/health")
-async def health_check(request: Request):
+async def health_check(db: Database = Depends(get_database)):
     try:
-        # Check database connection
-        await request.app.state.database.fetch_one("SELECT 1")
+        await db.fetch_one("SELECT 1")
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}, 503

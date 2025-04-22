@@ -12,7 +12,7 @@ import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import logging
-import asyncio
+from fastapi import Request
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -44,17 +44,19 @@ if not BASE_URL:
 
 logger.info(f"Using BASE_URL: {BASE_URL}")
 
-# Initialize database with better connection options
+import ssl
+
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
+
 database = Database(
     DATABASE_URL,
     min_size=1,
     max_size=3,
-    ssl=True,
-    echo=True,
-    pool_recycle=300,  # Recycle connections after 5 minutes
-    command_timeout=30.0  # 30 second timeout for commands
+    ssl=ssl_context,
+    command_timeout=30.0
 )
-
 # Initialize Supabase client
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 
@@ -214,3 +216,14 @@ async def startup():
     except Exception as e:
         logger.error(f"Failed to connect to database on startup: {str(e)}")
         # Don't raise exception here to allow the app to start even if DB is not available
+        
+@app.middleware("http")
+async def db_session_middleware(request: Request, call_next):
+    try:
+        if not database.is_connected:
+            await database.connect()
+        response = await call_next(request)
+    finally:
+        if database.is_connected:
+            await database.disconnect()
+    return response

@@ -1,10 +1,7 @@
 from sqlalchemy import Column, Integer, MetaData, String, Table
-from sqlalchemy.orm import declarative_base
 
-Base = declarative_base()
 metadata = MetaData()
 
-# URLs table definition
 urls = Table(
     "urls",
     metadata,

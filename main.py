@@ -1,229 +1,140 @@
-from typing import Optional, Dict, Any
-from contextlib import asynccontextmanager
-from databases import Database
-from sqlalchemy import select
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
+from databases import Database
+from sqlalchemy import select
+from dotenv import load_dotenv
+from supabase import create_client, Client
+import logging
+import os
 from database import urls
 from database_manager import DatabaseManager
-import os
-from supabase import create_client, Client
-from dotenv import load_dotenv
-import logging
-from fastapi import Request
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# Get environment variables with better error handling
 DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    logger.error("DATABASE_URL environment variable is not set.")
-    raise ValueError("DATABASE_URL environment variable is not set.")
-
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-if not SUPABASE_URL:
-    logger.error("SUPABASE_URL environment variable is not set.")
-    raise ValueError("SUPABASE_URL environment variable is not set.")
-
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
-if not SUPABASE_API_KEY:
-    logger.error("SUPABASE_API_KEY environment variable is not set.")
-    raise ValueError("SUPABASE_API_KEY environment variable is not set.")
-
 BASE_URL = os.getenv("BASE_URL")
-if not BASE_URL:
-    logger.error("BASE_URL environment variable is not set.")
-    raise ValueError("BASE_URL environment variable is not set.")
+
+for var, value in [("DATABASE_URL", DATABASE_URL), ("SUPABASE_URL", SUPABASE_URL),
+                   ("SUPABASE_API_KEY", SUPABASE_API_KEY), ("BASE_URL", BASE_URL)]:
+    if not value:
+        logger.error(f"{var} environment variable is not set.")
+        raise ValueError(f"{var} environment variable is not set.")
 
 logger.info(f"Using BASE_URL: {BASE_URL}")
 
-import ssl
-
-ssl_context = ssl.create_default_context()
-ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE
-
-database = Database(
-    DATABASE_URL,
-    min_size=1,
-    max_size=3,
-    ssl=ssl_context,
-    command_timeout=30.0
-)
-# Initialize Supabase client
+# Database and Supabase clients
+database = Database(DATABASE_URL, min_size=1, max_size=3, ssl=True, command_timeout=30.0)
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
-
-# Create database manager
 dbm = DatabaseManager(database, urls, supabase_client)
 
-# FastAPI app setup with custom exception handling
+# FastAPI app setup
 app = FastAPI()
 
-# Add exception handler for database errors
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Pydantic model
+class URLRequest(BaseModel):
+    original_url: str
+    custom_short: str | None = None
+
+# Exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    if "Event loop is closed" in str(exc) or "another operation is in progress" in str(exc):
-        # Handle event loop issues specially
-        logger.error(f"Event loop or connection error: {str(exc)}")
-        return JSONResponse(
-            status_code=503,
-            content={"error": "Database connection issue, please try again."},
-        )
-    # General exception handling
     logger.error(f"Unhandled exception: {str(exc)}")
     return JSONResponse(
         status_code=500,
         content={"error": "An unexpected error occurred."},
     )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production environments
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Pydantic model for URL shortening request
-class URLRequest(BaseModel):
-    original_url: str
-    custom_short: Optional[str] = None
-
-# Safe database connection context manager
-@asynccontextmanager
-async def get_connection():
-    try:
-        if not database.is_connected:
-            await database.connect()
-        yield database
-    except Exception as e:
-        logger.error(f"Database connection error: {str(e)}")
-        raise HTTPException(status_code=503, detail="Database connection failed")
-    # Don't disconnect here in serverless environment
-
-# Database manager dependency with safer connection handling
+# Dependency to get database manager
 async def get_dbm():
-    try:
-        if not database.is_connected:
-            await database.connect()
-        yield dbm
-    except Exception as e:
-        logger.error(f"Database manager error: {str(e)}")
-        raise HTTPException(status_code=503, detail="Database service unavailable")
+    yield dbm
 
-# Route to serve homepage
+# Routes
 @app.get("/")
 async def serve_homepage():
     return FileResponse("static/index.html")
 
-# Route to shorten URLs with better error handling
 @app.post("/shorten")
 async def shorten_url(request: URLRequest):
     try:
-        logger.info(f"Received request to shorten: {request.original_url[:30]}...")
-        
-        # Connect to database if needed
-        if not database.is_connected:
-            await database.connect()
-            
-        # Add URL
+        logger.info(f"Request from shorten: {request.original_url[:30]}...")
         short_id = await dbm.add_url(request.original_url, request.custom_short)
         short_url = f"{BASE_URL}/{short_id}"
-        
-        # Fetch the complete record
+
         query = select(urls).where(urls.c.short_url == short_id)
         result = await database.fetch_one(query)
-        
+
         if not result:
-            logger.error("Failed to retrieve URL information after shortening")
-            return JSONResponse(
-                status_code=500,
-                content={"error": "Failed to retrieve URL information"}
-            )
-            
+            return JSONResponse(status_code=500, content={"error": "Failed to retrieve URL info"})
+
         return {
             "original_url": request.original_url,
             "short_url": short_url,
             "qr_code_url": result["qr_code"]
         }
-    except HTTPException as e:
-        # Pass through HTTP exceptions
-        return JSONResponse(status_code=e.status_code, content={"error": e.detail})
     except Exception as e:
-        logger.error(f"Error in shorten_url: {str(e)}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Failed to shorten URL. Please try again."}
-        )
+        logger.error(f"shorten_url error: {str(e)}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": "Failed to shorten URL"})
 
-# Route to redirect short URLs with better error handling
 @app.get("/{short_url}")
 async def redirect_to_long_url(short_url: str):
     try:
-        # Connect to database if needed
-        if not database.is_connected:
-            await database.connect()
-            
-        # Get URL
-        result = await dbm.get_url(short_url) 
+        result = await dbm.get_url(short_url)
         if result:
-            long_url = result["long_url"]
-            return RedirectResponse(url=long_url)
-        
-        return JSONResponse(
-            status_code=404,
-            content={"error": "Short URL not found"}
-        )
-    except Exception as e:
-        logger.error(f"Error redirecting {short_url}: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Error processing redirect"}
-        )
+            return RedirectResponse(url=result["long_url"])
 
-# Health check endpoint with more detailed diagnostics
+        return JSONResponse(status_code=404, content={"error": "Short URL not found"})
+    except Exception as e:
+        logger.error(f"Redirect error for {short_url}: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": "Redirect failed"})
+
 @app.get("/health")
 async def health_check():
     status = {"status": "checking", "database": "unknown"}
     try:
-        # Try a new connection for health check
-        async with Database(DATABASE_URL, force_rollback=True) as db:
-            await db.fetch_one("SELECT 1")
-            status["database"] = "connected"
-            status["status"] = "healthy"
+        temp_db = Database(DATABASE_URL, ssl=True)
+        await temp_db.connect()
+        await temp_db.fetch_one("SELECT 1")
+        await temp_db.disconnect()
+        status.update(status="healthy", database="connected")
         return status
     except Exception as e:
-        status["database"] = "error"
-        status["status"] = "unhealthy"
-        status["error"] = str(e)
+        logger.error(f"Health check error: {str(e)}")
+        status.update(status="unhealthy", database="error", error=str(e))
         return JSONResponse(status_code=503, content=status)
 
-# Add startup event to connect to database
+# Startup event
 @app.on_event("startup")
 async def startup():
     try:
         logger.info("Connecting to database...")
         await database.connect()
-        logger.info("Database connection established")
+        logger.info("Database connected")
     except Exception as e:
-        logger.error(f"Failed to connect to database on startup: {str(e)}")
-        # Don't raise exception here to allow the app to start even if DB is not available
-        
-@app.middleware("http")
-async def db_session_middleware(request: Request, call_next):
-    try:
-        if not database.is_connected:
-            await database.connect()
-        response = await call_next(request)
-    finally:
-        if database.is_connected:
-            await database.disconnect()
-    return response
+        logger.error(f"Startup DB connection failed: {str(e)}")
+
+# No per-request middleware to connect/disconnect — let FastAPI events manage it
+@app.on_event("shutdown")
+async def shutdown():
+    if database.is_connected:
+        logger.info("Disconnecting database...")
+        await database.disconnect()
+        logger.info("Database disconnected")

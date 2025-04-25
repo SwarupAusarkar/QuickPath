@@ -32,7 +32,7 @@ for var, value in [("DATABASE_URL", DATABASE_URL), ("SUPABASE_URL", SUPABASE_URL
 
 logger.info(f"Using BASE_URL: {BASE_URL}")
 
-# Database and Supabase clients
+# Create database instance but don't connect yet
 database = Database(DATABASE_URL, min_size=1, max_size=3, ssl=True, command_timeout=30.0)
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 dbm = DatabaseManager(database, urls, supabase_client)
@@ -63,8 +63,24 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"error": "An unexpected error occurred."},
     )
 
+# Database connection middleware
+@app.middleware("http")
+async def db_session_middleware(request: Request, call_next):
+    if not database.is_connected:
+        await database.connect()
+        logger.info("Database connected in middleware")
+    
+    response = await call_next(request)
+    
+    # Don't disconnect after each request to avoid overhead
+    # Only disconnect in shutdown event
+    
+    return response
+
 # Dependency to get database manager
 async def get_dbm():
+    if not database.is_connected:
+        await database.connect()
     yield dbm
 
 # Routes
@@ -76,6 +92,10 @@ async def serve_homepage():
 async def shorten_url(request: URLRequest):
     try:
         logger.info(f"Request from shorten: {request.original_url[:30]}...")
+        # Ensure database is connected
+        if not database.is_connected:
+            await database.connect()
+            
         short_id = await dbm.add_url(request.original_url, request.custom_short)
         short_url = f"{BASE_URL}/{short_id}"
 
@@ -97,6 +117,10 @@ async def shorten_url(request: URLRequest):
 @app.get("/{short_url}")
 async def redirect_to_long_url(short_url: str):
     try:
+        # Ensure database is connected
+        if not database.is_connected:
+            await database.connect()
+            
         result = await dbm.get_url(short_url)
         if result:
             return RedirectResponse(url=result["long_url"])
@@ -110,18 +134,22 @@ async def redirect_to_long_url(short_url: str):
 async def health_check():
     status = {"status": "checking", "database": "unknown"}
     try:
-        temp_db = Database(DATABASE_URL, ssl=True)
-        await temp_db.connect()
-        await temp_db.fetch_one("SELECT 1")
-        await temp_db.disconnect()
-        status.update(status="healthy", database="connected")
+        # Use the existing database connection if available
+        if database.is_connected:
+            await database.fetch_one("SELECT 1")
+            status.update(status="healthy", database="connected")
+        else:
+            # Create a temporary connection for the health check
+            await database.connect()
+            await database.fetch_one("SELECT 1")
+            status.update(status="healthy", database="connected")
         return status
     except Exception as e:
         logger.error(f"Health check error: {str(e)}")
         status.update(status="unhealthy", database="error", error=str(e))
         return JSONResponse(status_code=503, content=status)
 
-# Startup event
+# Startup event - try to connect, but don't fail if it doesn't work
 @app.on_event("startup")
 async def startup():
     try:
@@ -129,9 +157,9 @@ async def startup():
         await database.connect()
         logger.info("Database connected")
     except Exception as e:
-        logger.error(f"Startup DB connection failed: {str(e)}")
+        logger.error(f"Startup DB connection failed: {str(e)} - Will retry on first request")
 
-# No per-request middleware to connect/disconnect — let FastAPI events manage it
+# Shutdown event
 @app.on_event("shutdown")
 async def shutdown():
     if database.is_connected:

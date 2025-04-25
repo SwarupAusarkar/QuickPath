@@ -4,12 +4,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from databases import Database
-from sqlalchemy import select
+from sqlalchemy import select, create_engine
+from sqlalchemy.pool import NullPool
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import logging
 import os
-from database import urls
+import urllib.parse
+from database import urls, metadata
 from database_manager import DatabaseManager
 
 # Logging setup
@@ -32,25 +34,65 @@ for var, value in [("DATABASE_URL", DATABASE_URL), ("SUPABASE_URL", SUPABASE_URL
 
 logger.info(f"Using BASE_URL: {BASE_URL}")
 
-# Create a database connection factory to ensure fresh connections for each request
-def get_database():
-    db = Database(DATABASE_URL, min_size=1, max_size=3, ssl=True, command_timeout=30.0)
+# Parse DATABASE_URL and modify it to use host instead of IP address if needed
+def get_fixed_database_url():
+    # Modify the DATABASE_URL to force IPv4 and specify connection options
+    # Format: postgresql://user:password@host:port/dbname?options
+    parsed = urllib.parse.urlparse(DATABASE_URL)
+    
+    # Add query parameters to force IPv4
+    query_dict = dict(urllib.parse.parse_qsl(parsed.query))
+    query_dict.update({
+        "sslmode": "require",
+        "target_session_attrs": "read-write",
+    })
+    
+    # Rebuild the URL with modified query parameters
+    updated_query = urllib.parse.urlencode(query_dict)
+    modified_url = urllib.parse.urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        updated_query,
+        parsed.fragment
+    ))
+    
+    return modified_url
+
+# Create a database with fixed URL
+def create_db_connection():
+    fixed_url = get_fixed_database_url()
+    logger.info(f"Creating database connection with modified URL")
+    
+    # Create a SQLAlchemy engine with nullpool to ensure we don't keep connections
+    engine = create_engine(fixed_url, poolclass=NullPool)
+    
+    # Create tables if they don't exist
+    metadata.create_all(engine)
+    
+    # Create a databases connection
+    db = Database(fixed_url, force_rollback=False)
     return db
 
-# Supabase client - can be reused
+# Supabase client
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 
-# Create context manager for database connections
+# Database context manager
 @asynccontextmanager
 async def get_db_context():
-    db = get_database()
+    db = create_db_connection()
     try:
         await db.connect()
         logger.info("Database connected")
         yield db
+    except Exception as e:
+        logger.error(f"Database connection error: {str(e)}")
+        raise
     finally:
-        await db.disconnect()
-        logger.info("Database disconnected")
+        if db.is_connected:
+            await db.disconnect()
+            logger.info("Database disconnected")
 
 # FastAPI app setup
 app = FastAPI()
@@ -109,7 +151,10 @@ async def shorten_url(request: URLRequest):
             }
     except Exception as e:
         logger.error(f"shorten_url error: {str(e)}", exc_info=True)
-        return JSONResponse(status_code=500, content={"error": "Failed to shorten URL"})
+        return JSONResponse(
+            status_code=500, 
+            content={"error": "Failed to shorten URL. Please check your database connection."}
+        )
 
 @app.get("/{short_url}")
 async def redirect_to_long_url(short_url: str):

@@ -32,10 +32,25 @@ for var, value in [("DATABASE_URL", DATABASE_URL), ("SUPABASE_URL", SUPABASE_URL
 
 logger.info(f"Using BASE_URL: {BASE_URL}")
 
-# Create database instance but don't connect yet
-database = Database(DATABASE_URL, min_size=1, max_size=3, ssl=True, command_timeout=30.0)
+# Create a database connection factory to ensure fresh connections for each request
+def get_database():
+    db = Database(DATABASE_URL, min_size=1, max_size=3, ssl=True, command_timeout=30.0)
+    return db
+
+# Supabase client - can be reused
 supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
-dbm = DatabaseManager(database, urls, supabase_client)
+
+# Create context manager for database connections
+@asynccontextmanager
+async def get_db_context():
+    db = get_database()
+    try:
+        await db.connect()
+        logger.info("Database connected")
+        yield db
+    finally:
+        await db.disconnect()
+        logger.info("Database disconnected")
 
 # FastAPI app setup
 app = FastAPI()
@@ -63,26 +78,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"error": "An unexpected error occurred."},
     )
 
-# Database connection middleware
-@app.middleware("http")
-async def db_session_middleware(request: Request, call_next):
-    if not database.is_connected:
-        await database.connect()
-        logger.info("Database connected in middleware")
-    
-    response = await call_next(request)
-    
-    # Don't disconnect after each request to avoid overhead
-    # Only disconnect in shutdown event
-    
-    return response
-
-# Dependency to get database manager
-async def get_dbm():
-    if not database.is_connected:
-        await database.connect()
-    yield dbm
-
 # Routes
 @app.get("/")
 async def serve_homepage():
@@ -92,24 +87,26 @@ async def serve_homepage():
 async def shorten_url(request: URLRequest):
     try:
         logger.info(f"Request from shorten: {request.original_url[:30]}...")
-        # Ensure database is connected
-        if not database.is_connected:
-            await database.connect()
+        
+        # Use context manager for database connection
+        async with get_db_context() as db:
+            # Create a new database manager for this request
+            db_manager = DatabaseManager(db, urls, supabase_client)
             
-        short_id = await dbm.add_url(request.original_url, request.custom_short)
-        short_url = f"{BASE_URL}/{short_id}"
+            short_id = await db_manager.add_url(request.original_url, request.custom_short)
+            short_url = f"{BASE_URL}/{short_id}"
 
-        query = select(urls).where(urls.c.short_url == short_id)
-        result = await database.fetch_one(query)
+            query = select(urls).where(urls.c.short_url == short_id)
+            result = await db.fetch_one(query)
 
-        if not result:
-            return JSONResponse(status_code=500, content={"error": "Failed to retrieve URL info"})
+            if not result:
+                return JSONResponse(status_code=500, content={"error": "Failed to retrieve URL info"})
 
-        return {
-            "original_url": request.original_url,
-            "short_url": short_url,
-            "qr_code_url": result["qr_code"]
-        }
+            return {
+                "original_url": request.original_url,
+                "short_url": short_url,
+                "qr_code_url": result["qr_code"]
+            }
     except Exception as e:
         logger.error(f"shorten_url error: {str(e)}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": "Failed to shorten URL"})
@@ -117,15 +114,16 @@ async def shorten_url(request: URLRequest):
 @app.get("/{short_url}")
 async def redirect_to_long_url(short_url: str):
     try:
-        # Ensure database is connected
-        if not database.is_connected:
-            await database.connect()
+        # Use context manager for database connection
+        async with get_db_context() as db:
+            # Create a new database manager for this request
+            db_manager = DatabaseManager(db, urls, supabase_client)
             
-        result = await dbm.get_url(short_url)
-        if result:
-            return RedirectResponse(url=result["long_url"])
+            result = await db_manager.get_url(short_url)
+            if result:
+                return RedirectResponse(url=result["long_url"])
 
-        return JSONResponse(status_code=404, content={"error": "Short URL not found"})
+            return JSONResponse(status_code=404, content={"error": "Short URL not found"})
     except Exception as e:
         logger.error(f"Redirect error for {short_url}: {str(e)}")
         return JSONResponse(status_code=500, content={"error": "Redirect failed"})
@@ -134,35 +132,12 @@ async def redirect_to_long_url(short_url: str):
 async def health_check():
     status = {"status": "checking", "database": "unknown"}
     try:
-        # Use the existing database connection if available
-        if database.is_connected:
-            await database.fetch_one("SELECT 1")
-            status.update(status="healthy", database="connected")
-        else:
-            # Create a temporary connection for the health check
-            await database.connect()
-            await database.fetch_one("SELECT 1")
+        # Create a fresh database connection for health check
+        async with get_db_context() as db:
+            await db.fetch_one("SELECT 1")
             status.update(status="healthy", database="connected")
         return status
     except Exception as e:
         logger.error(f"Health check error: {str(e)}")
         status.update(status="unhealthy", database="error", error=str(e))
         return JSONResponse(status_code=503, content=status)
-
-# Startup event - try to connect, but don't fail if it doesn't work
-@app.on_event("startup")
-async def startup():
-    try:
-        logger.info("Connecting to database...")
-        await database.connect()
-        logger.info("Database connected")
-    except Exception as e:
-        logger.error(f"Startup DB connection failed: {str(e)} - Will retry on first request")
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown():
-    if database.is_connected:
-        logger.info("Disconnecting database...")
-        await database.disconnect()
-        logger.info("Database disconnected")
